@@ -12,6 +12,7 @@ dependencies = [
     "rich>=13.0.0",
     "python-dotenv>=1.1.0",
     "tenacity>=9.0.0",
+    "groq>=1.2.0",
 ]
 
 [project.scripts]

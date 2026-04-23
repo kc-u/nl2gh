@@ -20,17 +20,23 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+# Force UTF-8 and disable legacy Windows renderer (which can't handle non-ASCII)
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Make src importable when run as script
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from nl2gh.providers.anthropic_provider import AnthropicProvider
 from nl2gh.providers.google_provider import GoogleProvider
+from nl2gh.providers.groq_provider import GroqProvider
 from nl2gh.schemas import GitHubSearchArgs
 from evals.metrics import score_case
 
 load_dotenv()
 app = typer.Typer()
-console = Console()
+console = Console(legacy_windows=False)
 
 CASES_FILE = Path(__file__).parent / "cases.jsonl"
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -38,13 +44,13 @@ RESULTS_DIR = Path(__file__).parent / "results"
 ALL_MODELS = {
     "claude": lambda: AnthropicProvider(os.environ["ANTHROPIC_API_KEY"]),
     "gemini": lambda: GoogleProvider(os.environ["GOOGLE_API_KEY"], "gemini-2.5-pro"),
-    "gemma": lambda: GoogleProvider(os.environ["GOOGLE_API_KEY"], "gemma-3-27b-it"),
+    "llama": lambda: GroqProvider(os.environ["GROQ_API_KEY"]),
 }
 
 
 def load_cases() -> list[dict]:
     cases = []
-    with open(CASES_FILE) as f:
+    with open(CASES_FILE, encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if line:
@@ -79,7 +85,7 @@ def run_model(model_name: str, cases: list[dict]) -> list[dict]:
             status = "[green]PASS[/green]" if scored["pass"] else "[red]FAIL[/red]"
             progress.console.print(f"  {status} {case['id']} — {case['nl'][:60]}")
             progress.advance(task)
-            time.sleep(0.3)  # avoid rate limits
+            time.sleep(0.3)
 
     return results
 
@@ -87,7 +93,7 @@ def run_model(model_name: str, cases: list[dict]) -> list[dict]:
 def save_results(model_name: str, results: list[dict]) -> Path:
     RESULTS_DIR.mkdir(exist_ok=True)
     out = RESULTS_DIR / f"{model_name}.jsonl"
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8") as f:
         for r in results:
             f.write(json.dumps(r, default=str) + "\n")
     return out

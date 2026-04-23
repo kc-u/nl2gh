@@ -18,7 +18,10 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 from .executor import GitHubAPIError, GitHubExecutor
 from .providers.anthropic_provider import AnthropicProvider
 from .providers.google_provider import GoogleProvider
+from .providers.groq_provider import GroqProvider
 from .schemas import GitHubSearchResult
+
+
 
 load_dotenv()
 
@@ -29,7 +32,7 @@ console = Console()
 class ModelChoice(str, Enum):
     claude = "claude"
     gemini = "gemini"
-    gemma = "gemma"
+    llama = "llama"
 
 
 class OutputFormat(str, Enum):
@@ -45,13 +48,18 @@ def _get_provider(model: ModelChoice):
             raise typer.Exit(1)
         return AnthropicProvider(key)
 
+    if model == ModelChoice.llama:
+        key = os.environ.get("GROQ_API_KEY", "")
+        if not key:
+            typer.echo("GROQ_API_KEY not set", err=True)
+            raise typer.Exit(1)
+        return GroqProvider(key)
+
     key = os.environ.get("GOOGLE_API_KEY", "")
     if not key:
         typer.echo("GOOGLE_API_KEY not set", err=True)
         raise typer.Exit(1)
-
-    model_id = "gemini-2.5-pro" if model == ModelChoice.gemini else "gemma-3-27b-it"
-    return GoogleProvider(key, model_id)
+    return GoogleProvider(key, "gemini-2.5-pro")
 
 
 @app.command()

@@ -100,7 +100,7 @@ def generate_report(models: list[str]) -> str:
             lines.append(
                 f"- **{r['id']}** ({r.get('category')}) — "
                 f"failed fields: `{', '.join(details_failed)}`  \n"
-                f"  NL: *{r['nl']}*"
+                f"  NL: *{r.get('nl', '')}*"
             )
         lines.append("")
 
@@ -108,7 +108,10 @@ def generate_report(models: list[str]) -> str:
 
 
 if __name__ == "__main__":
-    models = ["claude", "gemini", "gemma"]
+    import sys
+    if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    models = ["claude", "gemini", "llama"]
     report = generate_report(models)
     out = RESULTS_DIR / "report.md"
     out.write_text(report, encoding="utf-8")

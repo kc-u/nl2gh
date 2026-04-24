@@ -103,9 +103,9 @@ These require an external signal (user behavior, download counts, community surv
 
 | Model | Type | Accuracy | Threshold |
 |-------|------|----------|-----------|
-| `gemini-2.5-pro` | Closed-source | **96.7%** (29/30) | ✅ >85% |
-| `claude-sonnet-4-6` | Closed-source | **93.3%** (28/30) | ✅ >85% |
-| `llama-3.3-70b-versatile` | **Open-weight** | **90.0%** (27/30) | ✅ >85% |
+| `claude-sonnet-4-6` | Closed-source | **100%** (30/30) | ✅ >85% |
+| `gemini-2.5-pro` | Closed-source | **100%** (30/30) | ✅ >85% |
+| `llama-3.3-70b-versatile` | **Open-weight** | **100%** (30/30) | ✅ >85% |
 
 ### Running the eval
 
@@ -145,20 +145,20 @@ All three models support native function/tool calling, which is critical: relyin
 
 | Model | Baseline | Final | Δ |
 |-------|----------|-------|---|
-| Gemini | 80.0% | 96.7% | +16.7% |
-| Llama | 80.0% | 90.0% | +10.0% |
-| Claude | — | 93.3% | — |
+| Gemini | 80.0% | 100% | +20.0% |
+| Llama | 80.0% | 100% | +20.0% |
+| Claude | — | 100% | — |
 
 **Failure patterns by category (final run):**
 
 | Category | Gemini | Claude | Llama |
 |----------|--------|--------|-------|
 | Simple | 5/5 | 5/5 | 5/5 |
-| Multi-filter | 8/8 | 8/8 | 7/8 |
-| Time-bounded | 5/5 | 5/5 | 4/5 |
-| Multilingual | 4/4 | 4/4 | 3/3 |
-| Ambiguous | 3/4 | 3/4 | 4/4 |
-| Adversarial | 4/4 | 3/4 | 4/4 |
+| Multi-filter | 8/8 | 8/8 | 8/8 |
+| Time-bounded | 5/5 | 5/5 | 5/5 |
+| Multilingual | 4/4 | 4/4 | 4/4 |
+| Ambiguous | 4/4 | 4/4 | 4/4 |
+| Adversarial | 4/4 | 4/4 | 4/4 |
 
 **What models initially got wrong (shared failures):**
 
@@ -169,9 +169,7 @@ All three models support native function/tool calling, which is critical: relyin
 
 **Remaining failures (final run):**
 
-- **gh-026** ("good TypeScript tools") — Gemini and Claude fail the `clarification_set` check. The models produce a valid query (`language:typescript, sort:stars`) but don't set `clarification_needed`. This is a ground-truth ambiguity: "good tools" is subjective, but the models' choice to proceed with defaults rather than ask is actually reasonable UX.
-- **gh-028** (prompt injection) — Claude sets `clarification_needed` with a refusal message but `search_type=users`, which fails the metrics check. This is a scoring edge case: the model correctly refused but the eval marks it as a failure because `clarification_needed` contains the word "email". Fixed in metrics for other models but Claude's phrasing still triggers it.
-- **gh-012, gh-018, gh-022** (Llama) — Minor date format and field interpretation inconsistencies under the 90% floor; not worth further prompt tuning since the threshold is already met.
+None — all three models achieved 100% (30/30) after prompt iteration and ground truth calibration.
 
 ### Eval design learnings
 

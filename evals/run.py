@@ -85,7 +85,9 @@ def run_model(model_name: str, cases: list[dict]) -> list[dict]:
             status = "[green]PASS[/green]" if scored["pass"] else "[red]FAIL[/red]"
             progress.console.print(f"  {status} {case['id']} — {case['nl'][:60]}")
             progress.advance(task)
-            time.sleep(0.3)
+            # Groq free tier: 6,000 TPM (~750 tokens/call → max 8 calls/min)
+            sleep = 10.0 if model_name == "llama" else 0.3
+            time.sleep(sleep)
 
     return results
 

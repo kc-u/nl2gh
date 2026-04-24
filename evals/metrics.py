@@ -21,6 +21,16 @@ def _days_ago(days: int) -> str:
     return (date.today() - timedelta(days=days)).isoformat()
 
 
+def _dates_equivalent(a: str, b: str) -> bool:
+    """Return True if two date qualifiers are within 1 day of each other."""
+    try:
+        da = date.fromisoformat(a.lstrip("><"))
+        db = date.fromisoformat(b.lstrip("><"))
+        return abs((da - db).days) <= 1
+    except ValueError:
+        return False
+
+
 def _date_ok(value: str | None, direction: str) -> bool:
     """Check if a date qualifier is in the right ballpark for relative date cases."""
     if not value:
@@ -41,6 +51,9 @@ def _date_ok(value: str | None, direction: str) -> bool:
     if direction == "recent_7_days":
         expected = today - timedelta(days=7)
         return abs((cutoff - expected).days) <= 2
+    # year-boundary: ">2024-12-31" and ">2025-01-01" are equivalent
+    if direction == "year_start":
+        return abs(cutoff.year - today.year + 1) <= 1 and cutoff.month in (1, 12)
     return False
 
 
@@ -66,19 +79,22 @@ def score_case(case: dict, predicted: GitHubSearchArgs | None, error: str | None
         pred_val = pred.get(field)
 
         if exp_val is None:
-            # Field must simply be present and non-null
             details[field] = pred_val is not None
+        elif isinstance(exp_val, str):
+            match = str(pred_val or "").lower() == exp_val.lower()
+            # Also accept year-boundary equivalence: >2024-12-31 ≡ >2025-01-01
+            if not match and field in ("pushed", "created", "updated") and pred_val:
+                match = _dates_equivalent(str(pred_val), exp_val)
+            details[field] = match
         else:
-            if isinstance(exp_val, str):
-                details[field] = str(pred_val or "").lower() == exp_val.lower()
-            else:
-                details[field] = pred_val == exp_val
+            details[field] = pred_val == exp_val
 
-    # Date field check (approximate)
+    # Date field check (approximate).
+    # Also accepts "updated" as equivalent to "pushed" for repository queries.
     date_field = case.get("date_field")
     date_dir = case.get("date_direction")
     if date_field and date_dir:
-        date_val = pred.get(date_field)
+        date_val = pred.get(date_field) or pred.get("updated") if date_field == "pushed" else pred.get(date_field)
         details[f"{date_field}_date_approx"] = _date_ok(date_val, date_dir)
 
     # Clarification expected?

@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 evals/results/*.jsonl
 .pytest_cache/
+WORKFLOW.md

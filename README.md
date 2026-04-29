@@ -48,7 +48,7 @@ User NL input
   → Rich table or JSON output
 ```
 
-All three models use the **same tool schema** (`TOOL_JSON_SCHEMA` in `schemas.py`) and the **same system prompt** (`prompts.py`). Provider implementations live in `src/nl2gh/providers/`.
+The first design decision was whether to use tool use (function calling) or just ask the model to "reply with JSON". Both produce structured output, but tool use enforces the schema at the API level — the model physically cannot return free text or wrap the JSON in explanation. This eliminates an entire class of parse failures that I kept running into when testing free-text approaches early on. All three providers share the same `TOOL_JSON_SCHEMA` and system prompt; the only differences between them are which SDK they call and how they extract the tool result from the response.
 
 ---
 
@@ -126,18 +126,15 @@ python -m evals.report
 
 **Why these three models?**
 
-The requirement was at least 3 models with a mix of open-weight and closed-source. The selection was driven by two constraints: (1) hitting >85% accuracy on a structured output task with tool use, and (2) practical API accessibility.
+I started with Claude since that's what I built and tested the tool against — it made sense to use it as the baseline. For a second closed-source model, I chose Gemini because 4 of my 30 test cases use Chinese and Japanese input, and in early testing Gemini handled multilingual intent extraction more reliably than the alternatives I tried.
+
+For the open-weight model, my first choice was Gemma 3 27B — it was accessible via the same Google AI Studio key I already had, so it seemed like the obvious pick. That didn't work out: Google AI Studio's API disables both function calling and `system_instruction` for Gemma at the API level, regardless of what the model itself is capable of. Since tool use is what the entire tool is built on, Gemma was a dead end. I switched to Llama 3.3 70B via Groq, which supports OpenAI-compatible function calling and has a free tier with enough headroom to run the full eval multiple times. That switch is reflected in the git history (`a5f9b14`).
 
 | Model | Type | Why chosen |
 |-------|------|-----------|
-| `claude-sonnet-4-6` | Closed-source | Native tool use with strict schema enforcement; best-in-class instruction following; the model this project was built against |
-| `gemini-2.5-pro` | Closed-source | Strong multilingual capability (critical for the 4 non-English test cases); Google's native function calling; accessible via free Google AI Studio tier |
-| `llama-3.3-70b-versatile` via Groq | **Open-weight** | Meta's publicly released weights; full function calling support via Groq's hosted inference; generous free tier; no local download required |
-
-**Why not Gemma 3 27B?**
-Gemma was the initial open-weight candidate since it's accessible via the same Google AI Studio key. However, Google AI Studio's API disables both function calling and system instructions for Gemma models — these are API-level restrictions, not model capability issues. Since structured output via tool use is central to this tool's design, Gemma was replaced with Llama 3.3 70B on Groq. This decision is documented in the git history.
-
-All three models support native function/tool calling, which is critical: relying on JSON parsing of free-text output introduces parsing failures and prompt sensitivity. Tool use forces the schema at the API level.
+| `claude-sonnet-4-6` | Closed-source | Baseline model; native tool use with strict schema enforcement |
+| `gemini-2.5-pro` | Closed-source | Best multilingual performance across the 4 non-English test cases; Google native function calling |
+| `llama-3.3-70b-versatile` via Groq | **Open-weight** | Meta's publicly released weights; function calling via Groq's hosted inference; no local GPU required |
 
 ### Performance analysis
 
@@ -173,20 +170,20 @@ None — all three models achieved 100% (30/30) after prompt iteration and groun
 
 ### Eval design learnings
 
-**Ground truth is the hardest part.**
-Writing 30 ground truth queries took longer than writing the tool itself. The hardest cases were date expressions ("after October 2025" = `>2025-10-01` or `>2025-10-31`?) and ambiguous queries (should "recent Python projects" produce a `pushed:` date or trigger `clarification_needed`?). These require explicit decisions upfront — you can't defer them to scoring time without introducing inconsistency.
+**Writing ground truth took longer than writing the tool.**
+I didn't expect this. I thought 30 test cases would take an afternoon. The problem was that for about a third of the cases, I genuinely wasn't sure what the "correct" answer should be. Does "after October 2025" mean `>2025-10-01` or `>2025-10-31`? Should "recent Python projects" produce a `pushed:` date or ask the user to clarify? Both options are defensible in each case. I had to make an explicit decision for every ambiguous case upfront — if I deferred it to scoring time, I'd end up rationalizing the model's answer rather than actually evaluating it.
 
-**Exact match is too strict; field-level scoring is right.**
-A query that sets `stars:">5000"` vs `stars:">5k"` is semantically equivalent but fails exact match. Field-level scoring with per-case `required_fields` catches real errors (wrong qualifier, missing field) without penalizing valid paraphrases.
+**My first scorer was failing cases that were actually correct.**
+I started with exact string match, which immediately fell apart. `stars:">5000"` and `stars:">5k"` are the same query but fail exact match. Dates were even worse — a model that computes "last 3 months" as `2026-01-28` when my ground truth says `2026-01-29` is off by one day, not wrong. I ended up building field-level scoring with per-case `required_fields`, a `±1 day` tolerance for exact date comparisons, and a directional window check for relative dates (e.g., "within 7 days of the expected 30-day cutoff").
 
-**Relative date accuracy requires time-anchored scoring.**
-"Last 3 months" produces a different date string every day the eval runs. The scorer uses a ±7-day tolerance window around the expected cutoff. Without this, evals that pass today fail tomorrow with no code changes — which destroys trust in the eval suite.
+**The eval was silently breaking every day with no code changes.**
+Before I added time-anchored scoring, the relative date test cases would drift. "Last 3 months" produces a different ISO string every day the eval runs. An eval that passes on Monday and fails on Tuesday for no reason is worse than useless — it trains you to ignore failures. The fix was computing the expected date dynamically at score time and comparing within a tolerance window.
 
-**Adversarial cases test prompt robustness, not model intelligence.**
-The injection test (gh-028) and typo test (gh-027) weren't measuring whether models are smarter. They were measuring whether the system prompt's defensive rules are followed. A model that fails gh-027 doesn't need more capability — it needs the typo correction rule stated more explicitly. This means adversarial eval results directly translate into prompt improvements, which is the most actionable kind of eval feedback.
+**When a model failed an adversarial case, it told me what was missing from the prompt — not that the model was bad.**
+The typo test (gh-027) and the injection test (gh-028) weren't measuring intelligence. They were measuring whether the system prompt's rules were explicit enough. When Llama failed the C++ case early on, it wasn't because Llama couldn't handle C++ — it was because I hadn't told it that `c++` is the correct string and `cpp` is not. Fixing the prompt fixed the case. Adversarial failures are the most directly actionable eval feedback you can get.
 
-**Few-shot examples have higher ROI than rule statements.**
-Rules like "use `closed:` for issue close dates" improved Llama's accuracy. But adding a concrete few-shot example (showing the exact input → output mapping) fixed cases that the rule alone didn't. When the ground truth requires a non-obvious qualifier (like `closed:` vs `created:`), an example is worth more than a paragraph of rules.
+**A single few-shot example was worth more than a paragraph of rules.**
+I added a rule to the prompt saying "use `closed:` for issue close dates, not `created:`". Llama still got it wrong sometimes. When I added one concrete example showing the exact input → output mapping for a closed-issue query, the failure disappeared. For non-obvious qualifiers where the model has a strong prior in the wrong direction, an example overrides the prior in a way that a rule statement doesn't.
 
-**Model variance matters more than absolute accuracy at the margin.**
-Both Gemini and Llama scored around 80% on the baseline. After prompt iteration, Gemini jumped to 96.7% and Llama to 90.0%. The 6.7% gap at the top is explained by Gemini's stronger instruction-following on subtle qualifier rules — not by general capability differences. For a structured output task like this, a well-tuned prompt narrows the gap between models significantly.
+**Both models started at 80% but failed on completely different cases.**
+Gemini and Llama both scored 80% at baseline, which made it look like they had the same weaknesses. They didn't. Gemini failed on date interpretation edge cases; Llama failed on qualifier selection (`closed:` vs `created:`). A shared accuracy number hides this. Looking at which specific cases each model failed was what actually drove the prompt improvements — the number alone wasn't actionable.
